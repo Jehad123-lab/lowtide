@@ -46,6 +46,25 @@
        fluid.settings()         current tunable values as a plain object (for "copy settings JSON")
        fluid.defaults / fluid.options / fluid.halfFloat / fluid.stats() / fluid.destroy()
 
+   THREE PITFALLS WE HIT TUNING v3 (AND WHERE THE FIX LIVES)
+     1. Additive curl noise accumulates. Adding noise to the stored velocity every frame makes it grow without
+        limit, and the whole screen starts swimming. Fix: the noise only perturbs WHERE the paint shader samples
+        the previous frame (see "push += curl(...)" in PAINT), weighted by the stroke's own weight. The shape
+        drifts but the velocity never grows. The brush also SETS the velocity under the capsule (mix) instead of
+        adding to it.
+     2. Hitch frames become giant velocities. After a long frame or a tab switch, the pointer "jumps" hundreds of
+        px in one step, and that reads as a huge flick. Fix: stepPaint() caps each segment's pointer delta at 44 CSS px
+        before it becomes velocity, and the frame loop clamps dt to 1..50 ms.
+     3. Frame-rate-dependent decay. Multiplying by 0.985 per frame fades twice as fast at 120 Hz as at 60 Hz.
+        Fix: the dissipations are tuned at 60 fps and applied as pow(x, dt*60) in paintPass() (floorW is scaled
+        by the same factor). Extra sub-frame segments painted in the same frame get dt = 0, so they add brush
+        strokes without adding decay, advection or noise.
+
+   INPUT (main.js feeds this)
+     Mouse/pen: every getCoalescedEvents() sample goes to fluid.pointer(), and up to segmentsPerFrame capsules
+     are painted per frame, so a fast flick is a curve, not a straight chord. Touch: touchstart ends the old
+     stroke and starts a new one, touchmove carries velocity, and touchend / touchcancel end the stroke.
+
    KNOBS — see DEFAULTS below, every one is commented. The ones you will touch most:
      brushMin / brushRadius (stroke size), pushStrength (spread), dissV / dissW1 (how long it lingers),
      distort / refract / blur (how strongly the page bends), chroma / rgbShift / rim (colour fringes).

@@ -96,7 +96,7 @@ Mark up anything you want the fluid to bend:
 
 ### Knobs
 
-All options can be passed to `createFluid(canvas, { ... })`, changed live with `window.__fluid.set({ ... })`, or tuned in the `?gui` panel (which has a *copy settings JSON* button).
+All options can be passed to `createFluid(canvas, { ... })`, changed live with `window.__fluid.set({ ... })`, or tuned in the [`?gui` panel](#tuning-panel-gui) (which has a *copy settings JSON* button).
 
 | Group | Option | Default | Meaning |
 |-------|--------|---------|---------|
@@ -125,6 +125,47 @@ All options can be passed to `createFluid(canvas, { ... })`, changed live with `
 
 Phones use `dpr ≤ 1.25, paintDiv: 3, blurPasses: 2` and a smaller brush (see `main.js`).
 `window.__fluid.stats()` reads the paint buffer back (max velocity, coverage) for debugging.
+
+## Tuning panel (`?gui`)
+
+Open the live demo with **`?gui`** (or `#gui`): [lowtide.sites.tab.bot/?gui](https://lowtide.sites.tab.bot/?gui), also on [/studio.html?gui](https://lowtide.sites.tab.bot/studio.html?gui). Locally it's `http://localhost:8080/?gui`.
+
+- **[lil-gui](https://lil-gui.georgealways.com/) 0.19 loads only when `?gui` / `#gui` is in the URL.** It is imported lazily from jsDelivr by `js/gui.js`. The normal site downloads no extra code and stays dependency-free.
+- **`g`** hides/shows the panel on desktop (ignored while typing in an input).
+- **Presets** (the dropdown at the top). Choosing one resets everything to the defaults first, then applies the preset:
+  - **Lusion**: the defaults above, matched frame by frame to recordings of lusion.co
+  - **Subtle (round 2)**: the earlier, quieter look (smaller brush, little spread)
+  - **Bold**: a bigger brush, more spread, a stronger offset and rim
+  - **Ink-free glass**: no holographic rim and no RGB shift, only the glass body and highlight
+- **Folders**, one control per option in the knob table:
+  - **Brush**: radius still/fast, full-speed px/frame, velocity scale, edge softness, sub-frame segments
+  - **Field (spread & decay)**: spread/advection, blur passes, velocity/weight/highlight dissipation, weight floor, curl noise strength and scale
+  - **Distortion (post)**: offset × velocity, DOM (text/img) amount, rim refraction, blur length, tap jitter, chromatic split, RGB shift
+  - **Look**: holographic rim, rim band count, body tint colour, body strength, highlight
+  - **Quality** (closed by default): paint grid ÷, blur grid ÷, canvas dpr. Changing these rebuilds the render targets.
+- **Buttons**
+  - **reset to defaults**
+  - **copy settings JSON**: copies to the clipboard and also logs to the console, with a prompt as a fallback
+  - **paste settings JSON**: applies a JSON object you paste
+
+The copied JSON is a plain object of option names (everything except `dpr` and `paper`). You can paste it straight into code:
+
+```js
+const fluid = createFluid(canvas, {
+  /* paste the copied settings here */
+  "brushMin": 14, "brushRadius": 64, "pushStrength": 1.1, "distort": 10
+});
+```
+
+In a Framer port, use the same values as the property-control defaults of `<FluidBackground />`.
+
+## Touch & phones
+
+- **Touch input.** A finger down starts a new stroke, so you never get a line from where the last finger lifted. Moving the finger carries velocity like a mouse, and lifting it ends the stroke. Listeners are passive, so page scrolling is not blocked.
+- **Mouse/pen input** uses `pointermove` + `getCoalescedEvents()`. Every pointer sample since the last frame is painted, with up to `segmentsPerFrame` capsules per frame, so a fast flick draws a curve instead of a straight chord.
+- **Lighter settings on phones.** When the user agent is a phone/tablet or the viewport is < 720 px wide, `main.js` passes `dpr ≤ 1.25, paintDiv: 3, blurPasses: 2, brushMin: 12, brushRadius: 48, speedFull: 28`. That means a 1/3-res paint grid at a lower canvas resolution and a brush scaled to a thumb.
+- **The panel on a phone** starts collapsed (tap its title), runs full width and scrolls. Note: *reset* and the presets restore the **desktop** defaults (including `paintDiv: 4`). On a phone, tune from the phone values, or paste them back in with *paste settings JSON*.
+- **No WebGL2 / half-float, or `prefers-reduced-motion` / `?static`:** the page is plain DOM and static, and there's no fluid or panel.
 
 ## Porting to Framer (code components)
 
