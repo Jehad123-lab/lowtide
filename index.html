@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lowtide — a design studio for quiet, immersive brands</title>
+<meta name="description" content="Lowtide is a small design studio making calm, immersive websites: identity, web, motion and WebGL.">
+<meta name="theme-color" content="#ffffff">
+<meta property="og:title" content="Lowtide — a design studio for quiet, immersive brands">
+<meta property="og:description" content="Calm, immersive websites: identity, web, motion and WebGL.">
+<meta property="og:image" content="img/img04.webp">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="home">
+<!-- WebGL layer: fixed behind the page. js/fluid.js draws the fluid AND the GL copies of [data-gl-image] / [data-gl-text] elements here. -->
+<canvas id="gl" aria-hidden="true"></canvas>
+
+<!-- Preloader: 00 -> 100 counter (main.js), slides up when fonts + hero image are ready. -->
+<div class="preloader" id="preloader" aria-hidden="true">
+  <div class="preloader__row"><span class="sq sq--accent"></span><span class="preloader__count mono" id="count">00</span></div>
+  <p class="preloader__word mono">Lowtide — loading quietly</p>
+</div>
+<!-- Page wipe: dark panel that slides up before navigating between index.html and studio.html. -->
+<div class="wipe" id="wipe" aria-hidden="true"></div>
+
+<header class="header" id="header">
+  <a class="wordmark" href="index.html" data-link aria-label="Lowtide home"><span class="sq"></span>Lowtide</a>
+  <nav class="nav" aria-label="Primary">
+    <a href="#work" data-scroll>Work</a>
+    <a href="studio.html" data-link>Studio</a>
+    <a href="#contact" data-scroll>Contact</a>
+  </nav>
+  <div class="header__right">
+    <span class="mono header__time" id="clock" aria-live="off">— : —</span>
+    <a class="pill" href="mailto:hello@lowtide.studio">Let's talk</a>
+  </div>
+</header>
+
+<main class="page" id="page">
+  <section class="hero section" id="top">
+    <p class="eyebrow reveal"><span class="sq sq--accent"></span>Design studio · Dhaka &amp; remote</p>
+    <!-- data-split: main.js splits it into lines for the reveal. data-gl-text: after the reveal, the fluid draws this headline in WebGL so it can distort; the DOM text stays (transparent) for layout, selection and screen readers. -->
+    <h1 class="display reveal-lines" data-split data-gl-text>Quiet sites for brands that don’t need to shout.</h1>
+    <div class="hero__row">
+      <p class="lede reveal" style="--d:.35s">We design identities, websites and small moments of motion that feel calm on the surface and alive underneath. Move your cursor — the page is a fluid.</p>
+      <div class="hero__cta reveal" style="--d:.45s">
+        <a class="pill pill--dark" href="#work" data-scroll>See the work</a>
+        <a class="link" href="studio.html" data-link>About the studio <span aria-hidden="true">↗</span></a>
+      </div>
+    </div>
+    <figure class="hero__media reveal" style="--d:.55s">
+      <!-- data-gl-image: the fluid loads this image as a texture and draws it as a GL quad over this box (synced every frame with getBoundingClientRect). The <img> is the fallback for no-WebGL / reduced motion. -->
+      <div class="gl-image" data-gl-image="img/img04.webp" role="img" aria-label="Concrete tower against a pale sky"><img class="gl-image__fallback" src="img/img04.webp" alt="" loading="eager" decoding="async"></div>
+      <figcaption class="mono"><span>Fig. 01 — move across the image</span><a class="scroll-hint" href="#work" data-scroll><span class="scroll-hint__line"></span>Scroll</a><span>Image via cosmos.so</span></figcaption>
+    </figure>
+  </section>
+
+  <section class="section marquee-wrap" aria-hidden="true">
+    <div class="marquee mono"><span>Identity — Websites — Motion — WebGL — Framer — Art direction — </span><span>Identity — Websites — Motion — WebGL — Framer — Art direction — </span></div>
+  </section>
+
+  <section class="section work" id="work">
+    <div class="section__head">
+      <p class="eyebrow reveal"><span class="sq sq--accent"></span>Selected work</p>
+      <h2 class="title reveal-lines" data-split data-gl-text>Four projects we still think about.</h2>
+    </div>
+    <ul class="work__grid">
+      <li class="work__item reveal" style="--col:1; --span:6"><a class="work__link" href="studio.html" data-link>
+        <div class="media media--4x5"><img src="img/img02.webp" alt="Stacked concrete building in grey light" loading="lazy" decoding="async"></div>
+        <div class="work__meta"><span>Marrow Architecture</span><span class="mono">Identity, Web — 2026</span></div></a></li>
+      <li class="work__item reveal" style="--col:8; --span:5; --push:14vh"><a class="work__link" href="studio.html" data-link>
+        <div class="media media--3x4"><img src="img/img06.webp" alt="Lighthouse on a dark beach" loading="lazy" decoding="async"></div>
+        <div class="work__meta"><span>Northwatch</span><span class="mono">Web, Motion — 2025</span></div></a></li>
+      <li class="work__item reveal" style="--col:2; --span:4; --push:4vh"><a class="work__link" href="studio.html" data-link>
+        <div class="media media--3x4"><img src="img/img07.webp" alt="Lighthouse in sea mist" loading="lazy" decoding="async"></div>
+        <div class="work__meta"><span>Saltline Records</span><span class="mono">Identity — 2025</span></div></a></li>
+      <li class="work__item reveal" style="--col:7; --span:6"><a class="work__link" href="studio.html" data-link>
+        <div class="media media--16x10"><img src="img/img03.webp" alt="Stacked concrete terraces" loading="lazy" decoding="async"></div>
+        <div class="work__meta"><span>Tide Tables</span><span class="mono">WebGL, Web — 2026</span></div></a></li>
+    </ul>
+  </section>
+
+  <section class="section statement">
+    <p class="eyebrow reveal"><span class="sq sq--accent"></span>Our approach</p>
+    <!-- data-split-words: words light up one by one as this block scrolls through the viewport. -->
+    <p class="statement__text reveal-words" data-split-words>We start from stillness. Most sites compete for attention; ours earn it with pace, space and one or two things done unusually well.</p>
+  </section>
+
+  <section class="section services" id="services">
+    <div class="section__head">
+      <p class="eyebrow reveal"><span class="sq sq--accent"></span>What we do</p>
+    </div>
+    <ol class="services__list">
+      <li class="services__row reveal"><span class="mono">01</span><h3>Identity</h3><p>Wordmarks, type systems and colour that hold up at 16px and on a wall.</p></li>
+      <li class="services__row reveal"><span class="mono">02</span><h3>Websites</h3><p>Hand-built or Framer. Fast, accessible, and tuned on real phones before launch.</p></li>
+      <li class="services__row reveal"><span class="mono">03</span><h3>Motion &amp; WebGL</h3><p>Shaders, fluid and particle systems that stay under budget and off your battery.</p></li>
+      <li class="services__row reveal"><span class="mono">04</span><h3>Art direction</h3><p>Image, pace and tone for launches, films and campaigns.</p></li>
+    </ol>
+  </section>
+
+  <section class="section quote">
+    <figure class="quote__media reveal">
+      <div class="gl-image" data-gl-image="img/img08.webp" role="img" aria-label="Rocks in sea fog"><img class="gl-image__fallback" src="img/img08.webp" alt="" loading="lazy" decoding="async"></div>
+    </figure>
+    <div class="quote__body"><blockquote class="quote__text reveal-lines" data-split data-gl-text>“They made the site feel like our building — concrete, quiet, and somehow warm.”</blockquote>
+    <p class="mono reveal">Ana Rahman, Marrow Architecture</p></div>
+  </section>
+
+  <section class="section contact" id="contact">
+    <p class="eyebrow reveal"><span class="sq sq--accent"></span>New projects, 2026</p>
+    <h2 class="display reveal-lines" data-split data-gl-text>Let’s make something quiet.</h2>
+    <div class="contact__row reveal">
+      <a class="pill pill--dark" href="mailto:hello@lowtide.studio">hello@lowtide.studio</a>
+      <p class="lede">Two or three projects a season. Tell us what it is and when it needs to exist.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <span class="wordmark"><span class="sq"></span>Lowtide</span>
+  <span class="mono">Dhaka · <span id="clock2">—</span></span>
+  <nav class="footer__nav" aria-label="Footer"><a href="https://cosmos.so" rel="noopener">Images: cosmos.so</a><a href="studio.html" data-link>Studio</a><a href="#top" data-scroll>Top ↑</a></nav>
+  <span class="mono">© 2026 Lowtide</span>
+</footer>
+
+<!-- Custom cursor (only shown on mouse/trackpad devices). -->
+<div class="cursor" id="cursor" aria-hidden="true"><span class="cursor__dot"></span><span class="cursor__label mono"></span></div>
+<!-- One ES module, no build step: main.js imports fluid.js (and gui.js only with ?gui). -->
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

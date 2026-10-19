@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Studio — Lowtide</title>
+<meta name="description" content="Lowtide is a two-person design studio working between Dhaka and wherever the client is.">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body data-page="studio">
+<!-- Second page: same shell as index.html (canvas, preloader, wipe, header). See index.html for what each data-* attribute does. -->
+<canvas id="gl" aria-hidden="true"></canvas>
+<div class="preloader" id="preloader" aria-hidden="true">
+  <div class="preloader__row"><span class="sq sq--accent"></span><span class="preloader__count mono" id="count">00</span></div>
+  <p class="preloader__word mono">Lowtide — studio</p>
+</div>
+<div class="wipe" id="wipe" aria-hidden="true"></div>
+
+<header class="header" id="header">
+  <a class="wordmark" href="index.html" data-link aria-label="Lowtide home"><span class="sq"></span>Lowtide</a>
+  <nav class="nav" aria-label="Primary">
+    <a href="index.html#work" data-link>Work</a>
+    <a href="studio.html" data-link aria-current="page">Studio</a>
+    <a href="index.html#contact" data-link>Contact</a>
+  </nav>
+  <div class="header__right">
+    <span class="mono header__time" id="clock">— : —</span>
+    <a class="pill" href="mailto:hello@lowtide.studio">Let's talk</a>
+  </div>
+</header>
+
+<main class="page" id="page">
+  <section class="hero hero--studio section" id="top">
+    <p class="eyebrow reveal"><span class="sq sq--accent"></span>The studio</p>
+    <!-- Split into lines for the reveal, then handed to WebGL so the fluid can distort it. -->
+    <h1 class="display reveal-lines" data-split data-gl-text>Two people, a long table, and a view of the river.</h1>
+    <div class="hero__row">
+      <p class="lede reveal" style="--d:.35s">Lowtide was started in 2024 by a designer and a developer who kept getting hired as a pair. We work from Dhaka and from wherever the client is, in small, focused seasons.</p>
+    </div>
+    <figure class="hero__media hero__media--tall reveal" style="--d:.5s">
+      <div class="gl-image" data-gl-image="img/img11.webp" role="img" aria-label="Concrete facade with deep shadows"><img class="gl-image__fallback" src="img/img11.webp" alt="" loading="eager" decoding="async"></div>
+      <figcaption class="mono"><span>Fig. 02</span><span>Image via cosmos.so</span></figcaption>
+    </figure>
+  </section>
+
+  <section class="section statement">
+    <p class="eyebrow reveal"><span class="sq sq--accent"></span>How we work</p>
+    <p class="statement__text reveal-words" data-split-words>One conversation a week, one build you can open on your phone from day three, and no decks. We’d rather show you the thing.</p>
+  </section>
+
+  <section class="section services">
+    <div class="section__head"><p class="eyebrow reveal"><span class="sq sq--accent"></span>Principles</p></div>
+    <ol class="services__list">
+      <li class="services__row reveal"><span class="mono">01</span><h3>Pace over polish</h3><p>Timing is the brand. We tune easing before we tune colour.</p></li>
+      <li class="services__row reveal"><span class="mono">02</span><h3>Respect the device</h3><p>Reduced-motion users get a still page. Phones get a lighter sim. Nobody gets a hot laptop.</p></li>
+      <li class="services__row reveal"><span class="mono">03</span><h3>Borrow technique, not assets</h3><p>We study the best sites in the world and write our own code.</p></li>
+    </ol>
+  </section>
+
+  <section class="section work work--compact">
+    <div class="section__head"><p class="eyebrow reveal"><span class="sq sq--accent"></span>Around the studio</p></div>
+    <ul class="work__grid">
+      <li class="work__item reveal" style="--col:1; --span:5"><div class="media media--4x5"><img src="img/img05.webp" alt="Lighthouse in a grey wave" loading="lazy"></div></li>
+      <li class="work__item reveal" style="--col:8; --span:5; --push:12vh"><div class="media media--3x4"><img src="img/img12.webp" alt="Lighthouse at dusk" loading="lazy"></div></li>
+      <li class="work__item reveal" style="--col:2; --span:5; --push:4vh"><div class="media media--16x10"><img src="img/img09.webp" alt="Lighthouse and grey sea" loading="lazy"></div></li>
+      <li class="work__item reveal" style="--col:8; --span:5"><div class="media media--4x5"><img src="img/img10.webp" alt="Hand on rock, black and white" loading="lazy"></div></li>
+    </ul>
+  </section>
+
+  <section class="section contact" id="contact">
+    <p class="eyebrow reveal"><span class="sq sq--accent"></span>Say hello</p>
+    <h2 class="display reveal-lines" data-split data-gl-text>We read every email, slowly.</h2>
+    <div class="contact__row reveal"><a class="pill pill--dark" href="mailto:hello@lowtide.studio">hello@lowtide.studio</a><p class="lede">Or come back to the <a class="link" href="index.html#work" data-link>work</a>.</p></div>
+  </section>
+</main>
+
+<footer class="footer">
+  <span class="wordmark"><span class="sq"></span>Lowtide</span>
+  <span class="mono">Dhaka · <span id="clock2">—</span></span>
+  <nav class="footer__nav" aria-label="Footer"><a href="https://cosmos.so" rel="noopener">Images: cosmos.so</a><a href="index.html" data-link>Home</a><a href="#top" data-scroll>Top ↑</a></nav>
+  <span class="mono">© 2026 Lowtide</span>
+</footer>
+<div class="cursor" id="cursor" aria-hidden="true"><span class="cursor__dot"></span><span class="cursor__label mono"></span></div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

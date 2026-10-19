@@ -1,0 +1,210 @@
+/* =====================================================================================================
+   Lowtide — css/style.css
+   The whole design system in one file. Wajo-style minimalism: white page, ink #171717, one orange accent,
+   hairlines, Inter for text and Geist Mono for small uppercase labels, a 1320px column.
+
+   Layering (z-index), bottom to top:
+     0   #gl canvas — the WebGL layer (fluid + GL copies of images and headlines), fixed, full viewport
+     1   .page — the real DOM content. Its background is transparent so the canvas shows through; images
+         and GL headlines become invisible in the DOM once GL draws them (.is-gl), but keep their layout
+     40  header     55  page wipe     60  preloader     cursor on top
+   Motion uses two easing curves (--ease, --ease-2), the same "two-curve palette" idea studied on lusion.co.
+   ===================================================================================================== */
+/* Design tokens: colours, fonts, spacing, radius, easing. These map 1:1 to Framer colour/text styles. */
+:root{
+  --page:#ffffff; --ink:#171717; --ink-2:#666666; --line:#e5e5e5; --surface:#f5f5f5; --accent:#ff8527;
+  --font:"Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --mono:"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --gutter:clamp(20px, 4vw, 56px); --max:1320px; --radius:20px;
+  --ease:cubic-bezier(.4,0,.1,1); --ease-2:cubic-bezier(.35,0,0,1); --t:.5s;
+  --header-h:72px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:auto}
+body{margin:0;background:var(--page);color:var(--ink);font:400 17px/1.6 var(--font);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
+/* Scroll is locked while the preloader runs. */
+body.is-loading{overflow:hidden}
+img{display:block;max-width:100%;height:auto}
+a{color:inherit;text-decoration:none}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}
+::selection{background:var(--accent);color:#fff}
+.mono{font-family:var(--mono);font-size:12px;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-2)}
+.sq{display:inline-block;width:9px;height:9px;background:var(--ink);margin-right:10px;vertical-align:1px;flex:none}
+.sq--accent{background:var(--accent)}
+
+/* GL layer behind everything */
+#gl{position:fixed;inset:0;width:100%;height:100%;z-index:0;display:block;pointer-events:none}
+/* no-gl: WebGL unavailable or reduced motion -> hide the canvas, the plain DOM page is the whole site. */
+body.no-gl #gl{display:none}
+body.no-gl{background:var(--page)}
+
+/* preloader + page wipe */
+.preloader{position:fixed;inset:0;z-index:60;background:var(--page);display:flex;flex-direction:column;justify-content:flex-end;padding:var(--gutter);gap:12px;transition:transform .9s var(--ease-2),opacity .3s;will-change:transform}
+.preloader__row{display:flex;align-items:center}
+.preloader__count{font-size:clamp(48px,9vw,120px);letter-spacing:-.04em;color:var(--ink);text-transform:none;line-height:1}
+.preloader.is-done{transform:translate3d(0,-100%,0);pointer-events:none}
+.wipe{position:fixed;inset:0;z-index:55;background:var(--ink);transform:translate3d(0,100%,0);pointer-events:none;will-change:transform;visibility:hidden}
+.wipe.is-in{visibility:visible;transition:transform .6s var(--ease-2);transform:translate3d(0,0,0)}
+
+/* header */
+.header{position:fixed;top:0;left:0;right:0;z-index:40;height:var(--header-h);display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 var(--gutter);transition:transform .5s var(--ease),background .4s,backdrop-filter .4s}
+.header.is-scrolled{background:rgba(255,255,255,.78);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.header.is-scrolled::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--line)}
+/* main.js toggles .is-scrolled (frosted bar after 40px) and .is-hidden (slides up while scrolling down). */
+.header.is-hidden{transform:translate3d(0,-100%,0)}
+.wordmark{display:inline-flex;align-items:center;font-weight:600;letter-spacing:-.02em;font-size:18px}
+.nav{display:flex;gap:28px;font-size:14px;font-weight:500}
+.nav a{position:relative;padding:6px 0;color:var(--ink-2);transition:color .3s}
+.nav a:hover,.nav a[aria-current]{color:var(--ink)}
+.nav a::after{content:"";position:absolute;left:0;right:100%;bottom:2px;height:1px;background:var(--ink);transition:right .4s var(--ease)}
+.nav a:hover::after,.nav a[aria-current]::after{right:0}
+.header__right{display:flex;justify-content:flex-end;align-items:center;gap:20px}
+.header__time{text-transform:none}
+.pill{display:inline-flex;align-items:center;height:40px;padding:0 18px;border:1px solid var(--line);border-radius:999px;font-size:14px;font-weight:500;background:var(--page);transition:background .3s,border-color .3s,color .3s,transform .5s var(--ease)}
+.pill:hover{border-color:var(--ink);transform:translate3d(0,-1px,0)}
+.pill--dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+.pill--dark:hover{background:#000}
+.link{font-size:15px;font-weight:500;border-bottom:1px solid var(--line);padding-bottom:2px;transition:border-color .3s}
+.link:hover{border-color:var(--ink)}
+
+/* layout */
+.page{position:relative;z-index:1}
+.section{position:relative;padding:0 var(--gutter);max-width:var(--max);margin:0 auto}
+.section__head{display:grid;gap:18px;margin-bottom:clamp(32px,5vw,64px)}
+.eyebrow{display:flex;align-items:center;margin:0 0 20px;font-size:13px;font-weight:500;color:var(--ink-2);letter-spacing:.01em}
+.display{font-size:clamp(38px,6.2vw,88px);line-height:1.02;letter-spacing:-.045em;font-weight:600;margin:0;max-width:16ch;text-wrap:balance}
+.title{font-size:clamp(28px,3.4vw,46px);line-height:1.08;letter-spacing:-.035em;font-weight:600;margin:0;max-width:20ch;text-wrap:balance}
+.lede{font-size:clamp(17px,1.35vw,20px);line-height:1.55;color:var(--ink-2);max-width:48ch;margin:0}
+
+/* hero */
+.hero{padding-top:calc(var(--header-h) + clamp(48px,10vh,120px));min-height:100svh;display:flex;flex-direction:column}
+.hero__row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:32px;margin-top:clamp(24px,3vw,40px)}
+.hero__cta{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.hero__media{margin:clamp(40px,7vh,96px) 0 0;position:relative}
+.gl-image{position:relative;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;background:var(--surface)}
+.hero__media--tall .gl-image{aspect-ratio:21/9}
+.gl-image__fallback{width:100%;height:100%;object-fit:cover;transition:opacity .4s}
+/* [data-gl-image] boxes: the <img> inside is the fallback; once GL has the texture (.is-gl) it fades out and the canvas draws the image in the same spot. */
+.gl-image.is-gl .gl-image__fallback{opacity:0}
+body.no-gl .gl-image__fallback{opacity:1 !important}
+/* the GL canvas sits behind the page, so the region under a gl-image must be transparent: we cut a hole with a transparent background and rely on the canvas draw */
+.gl-image{background:transparent}
+.hero__media figcaption{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 4px 0}
+.scroll-hint{display:inline-flex;align-items:center;gap:12px}
+.scroll-hint__line{width:36px;height:1px;background:var(--ink-2);transform-origin:left;animation:line 1.8s var(--ease) infinite}
+@keyframes line{0%{transform:scaleX(0);transform-origin:left}50%{transform:scaleX(1);transform-origin:left}51%{transform-origin:right}100%{transform:scaleX(0);transform-origin:right}}
+
+/* marquee */
+.marquee-wrap{max-width:none;padding:clamp(48px,8vh,96px) 0 0;overflow:hidden;border-top:1px solid var(--line);margin-top:clamp(64px,10vh,120px)}
+.marquee{display:flex;white-space:nowrap;width:max-content;font-size:12px;padding:14px 0 14px;animation:marquee 40s linear infinite}
+.marquee span{padding-right:0}
+@keyframes marquee{to{transform:translate3d(-50%,0,0)}}
+
+/* work grid */
+.work{padding-top:clamp(64px,12vh,160px)}
+.work__grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(12,1fr);column-gap:clamp(16px,2vw,28px);row-gap:clamp(48px,8vh,112px)}
+.work__item{grid-column:var(--col,auto) / span var(--span,6);margin-top:var(--push,0)}
+.work__link{display:block}
+.media{position:relative;overflow:hidden;border-radius:var(--radius);background:var(--surface)}
+.media--4x5{aspect-ratio:4/5}.media--3x4{aspect-ratio:3/4}.media--16x10{aspect-ratio:16/10}
+.media img{width:100%;height:100%;object-fit:cover;transform:scale(1.06);transition:transform 1.2s var(--ease-2),filter .8s}
+.reveal.is-in .media img{transform:scale(1)}
+.work__link:hover .media img{transform:scale(1.04)}
+.work__meta{display:flex;justify-content:space-between;gap:16px;padding:16px 2px 0;font-size:15px;font-weight:500}
+.work__meta .mono{text-transform:none;letter-spacing:0}
+
+/* statement */
+.statement{padding-top:clamp(96px,16vh,200px)}
+.statement__text{font-size:clamp(26px,3.6vw,52px);line-height:1.15;letter-spacing:-.03em;font-weight:500;margin:0;max-width:24ch}
+.statement__text .w{display:inline-block;opacity:.18;transition:opacity .6s var(--ease)}
+.statement__text .w.is-on{opacity:1}
+
+/* services */
+.services{padding-top:clamp(96px,16vh,200px)}
+.services__list{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
+.services__row{display:grid;grid-template-columns:64px minmax(0,1fr) minmax(0,1.2fr);gap:24px;align-items:baseline;padding:28px 0;border-bottom:1px solid var(--line);transition:padding .5s var(--ease)}
+.services__row h3{margin:0;font-size:clamp(22px,2.4vw,32px);letter-spacing:-.03em;font-weight:600}
+.services__row p{margin:0;color:var(--ink-2);max-width:44ch}
+.services__row:hover{padding-left:12px}
+
+/* quote */
+.quote{padding-top:clamp(96px,16vh,200px);display:grid;grid-template-columns:5fr 7fr;gap:clamp(24px,4vw,64px);align-items:end}
+.quote__media{margin:0}
+.quote__body{display:flex;flex-direction:column;justify-content:flex-end;gap:24px;padding-bottom:8px}
+.quote__media .gl-image{aspect-ratio:4/5}
+.quote__text{margin:0;font-size:clamp(24px,2.8vw,40px);line-height:1.2;letter-spacing:-.03em;font-weight:500;text-wrap:balance}
+.quote .mono{margin:0}
+
+/* contact */
+.contact{padding:clamp(120px,20vh,260px) var(--gutter) clamp(96px,14vh,160px)}
+.contact__row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:32px;align-items:center;margin-top:clamp(32px,4vw,56px)}
+.contact .pill{height:52px;padding:0 24px;font-size:16px}
+
+/* footer */
+.footer{position:relative;z-index:1;display:grid;grid-template-columns:1fr auto auto auto;gap:32px;align-items:center;padding:28px var(--gutter);border-top:1px solid var(--line);max-width:var(--max);margin:0 auto;font-size:14px}
+.footer__nav{display:flex;gap:24px}
+.footer__nav a{color:var(--ink-2)}.footer__nav a:hover{color:var(--ink)}
+
+/* GL text: once the fluid has rasterised a headline, the DOM copy goes transparent (layout, selection and a11y stay) */
+[data-gl-text]{transition:color .3s}
+/* color: transparent (not visibility/opacity) so the text keeps its layout, can still be selected and is still read by screen readers. */
+[data-gl-text].is-gl{color:transparent}
+[data-gl-text].is-gl::selection,[data-gl-text].is-gl *::selection{color:#fff}
+body.no-gl [data-gl-text]{color:inherit !important}
+
+/* '+' grid markers at section corners */
+/* Two 1px hairlines crossing in an 11px box; main.js appends them to each section's corners, centred on the column's gutter edge. */
+.plus{position:absolute;width:11px;height:11px;pointer-events:none;opacity:0;transition:opacity 1.2s var(--ease) .4s}
+.plus::before,.plus::after{content:"";position:absolute;background:#c9c9c9}
+.plus::before{left:0;right:0;top:5px;height:1px}
+.plus::after{top:0;bottom:0;left:5px;width:1px}
+.plus--tl{left:calc(var(--gutter) - 5px);top:-5px}.plus--tr{right:calc(var(--gutter) - 5px);top:-5px}
+.plus--bl{left:calc(var(--gutter) - 5px);bottom:-5px}.plus--br{right:calc(var(--gutter) - 5px);bottom:-5px}
+.hero .plus--tl,.hero .plus--tr{top:calc(var(--header-h) + 6px)}
+.contact .plus--bl,.contact .plus--br{bottom:0}
+body.is-ready .plus{opacity:1}
+
+/* lil-gui (?gui) — our global .title/.display classes must not leak into the panel */
+.lil-gui .title,.lil-gui .name,.lil-gui .controller{font-size:11px;letter-spacing:0;max-width:none;text-wrap:initial;line-height:1.4}
+.lil-gui .title{font-weight:600;line-height:calc(var(--title-height) - 4px)}
+.lil-gui{--background-color:#171717;--widget-color:#2a2a2a;--hover-color:#333;--focus-color:#444;--number-color:#ff8527;--string-color:#ffb380;font-family:var(--mono);text-transform:none}
+.lil-gui.root{max-height:calc(100vh - 16px);overflow:auto}
+
+/* reveals */
+/* main.js adds .is-in when an element scrolls into view. .reveal = fade + rise; .reveal-lines = each line (split by main.js) slides up out of an overflow:hidden mask, staggered by --i. --d = extra delay set inline in the HTML. */
+.reveal{opacity:0;transform:translate3d(0,24px,0);transition:opacity .8s var(--ease),transform .9s var(--ease-2);transition-delay:var(--d,0s)}
+.reveal.is-in{opacity:1;transform:none}
+.reveal-lines .line{display:block;overflow:hidden}
+.reveal-lines .line>span{display:block;transform:translate3d(0,110%,0);transition:transform 1s var(--ease-2);transition-delay:calc(var(--i,0) * .08s + var(--d,0s))}
+.reveal-lines.is-in .line>span{transform:none}
+
+/* cursor */
+.cursor{position:fixed;left:0;top:0;z-index:70;pointer-events:none;display:none;will-change:transform}
+.cursor__dot{position:absolute;left:-4px;top:-4px;width:8px;height:8px;border-radius:50%;background:var(--ink);transition:transform .3s var(--ease),background .3s}
+.cursor__label{position:absolute;left:14px;top:-8px;white-space:nowrap;background:var(--ink);color:#fff;padding:4px 8px;border-radius:999px;opacity:0;transform:translate3d(-6px,0,0);transition:opacity .3s,transform .3s var(--ease)}
+.cursor.is-link .cursor__dot{transform:scale(2.2);background:var(--accent)}
+.cursor.has-label .cursor__label{opacity:1;transform:none}
+@media (hover:hover) and (pointer:fine){body.has-cursor .cursor{display:block}}
+
+/* responsive */
+@media (max-width:1000px){
+  .header{grid-template-columns:auto 1fr auto}.nav{justify-content:center}
+  .quote{grid-template-columns:1fr}
+  .services__row{grid-template-columns:48px 1fr;gap:12px 20px}.services__row p{grid-column:2}
+}
+@media (max-width:720px){
+  :root{--header-h:64px}
+  .nav{display:none}.header{grid-template-columns:1fr auto}.header__time{display:none}
+  .display{font-size:clamp(36px,11vw,56px);letter-spacing:-.04em}
+  .hero{min-height:auto}.hero__row{grid-template-columns:1fr;gap:20px}
+  .hero__media{margin-top:32px}.gl-image,.hero__media--tall .gl-image{aspect-ratio:4/5}.scroll-hint{display:none}
+  .work__grid{grid-template-columns:1fr;row-gap:40px}.work__item{grid-column:1 !important;margin-top:0 !important}
+  .contact__row{grid-template-columns:1fr}.contact .pill{width:100%;justify-content:center}
+  .footer{grid-template-columns:1fr 1fr;gap:16px}.footer__nav{grid-column:1/-1;flex-wrap:wrap;gap:16px}
+  .statement__text{max-width:none}
+}
+/* Belt and braces for reduced motion (main.js already skips the fluid, smooth scroll and cursor): kill every CSS transition/animation. */
+@media (prefers-reduced-motion:reduce){
+  .reveal,.reveal-lines .line>span,.media img{transition:none !important;transform:none !important;opacity:1 !important}
+  .marquee,.scroll-hint__line{animation:none}
+  .preloader{transition:none}
+}
