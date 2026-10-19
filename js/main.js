@@ -34,14 +34,15 @@ document.body.classList.add('is-loading');
 /* ---------- fluid ---------- */
 // manual: true -> the fluid does not run its own rAF; the single loop at the bottom of this file calls
 // fluid.render() AFTER the smooth-scroll write, so GL quads are always placed at this frame's DOM position.
-// Mobile: lower dpr, a 1/3 paint grid (it is a small screen, so 1/3 still costs little), fewer blur passes and a
-// smaller brush that reaches full size at a lower finger speed.
+// Mobile: lower dpr and a 1/3 paint grid (it is a small screen, so 1/3 still costs little). Everything else follows
+// the Lusion defaults — the brush rule max(40, width / 20) already gives a 40 px brush on a phone. These two values
+// also become the phone's "defaults" inside the fluid, so the panel's reset / presets keep them.
 // If createFluid throws (e.g. a shader fails to compile on an odd GPU) we log a warning and use the static page.
 let fluid = null;
 if (!reduced) {
   try {
     fluid = createFluid($('#gl'), isMobile
-      ? { manual: true, dpr: Math.min(devicePixelRatio, 1.25), paintDiv: 3, blurPasses: 2, brushRadius: 48, brushMin: 12, speedFull: 28 }
+      ? { manual: true, dpr: Math.min(devicePixelRatio, 1.25), paintDiv: 3 }
       : { manual: true, dpr: Math.min(devicePixelRatio, 1.5) });
   } catch (e) { console.warn('fluid unavailable:', e.message); fluid = null; }
 }
@@ -55,9 +56,11 @@ else {
   // A click starts a fresh stroke so the brush does not draw a straight line from wherever the pointer last was.
   window.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'touch') { fluid.pointerLeave(); fluid.pointer(e.clientX, e.clientY); } }, { passive: true });
   document.documentElement.addEventListener('pointerleave', () => fluid.pointerLeave());
-  // touch: a new finger starts a new stroke (no chord from the last lift point); moves carry velocity like the mouse
-  window.addEventListener('touchstart', (e) => { const t = e.touches[0]; if (t) { fluid.pointerLeave(); fluid.pointer(t.clientX, t.clientY); } }, { passive: true });
-  window.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) fluid.pointer(t.clientX, t.clientY); }, { passive: true });
+  // touch: a new finger starts a new stroke (no chord from the last lift point); moves carry velocity like the mouse.
+  // Lusion's mobile rule: paint only while a finger is down AND moving (a resting finger has zero travel -> radius 0).
+  // The third argument marks the stroke as touch, which turns scroll paint off (on a phone the finger is the scroll).
+  window.addEventListener('touchstart', (e) => { const t = e.touches[0]; if (t) { fluid.pointerLeave(); fluid.pointer(t.clientX, t.clientY, true); } }, { passive: true });
+  window.addEventListener('touchmove', (e) => { const t = e.touches[0]; if (t) fluid.pointer(t.clientX, t.clientY, true); }, { passive: true });
   window.addEventListener('touchend', () => fluid.pointerLeave(), { passive: true });
   window.addEventListener('touchcancel', () => fluid.pointerLeave(), { passive: true });
   // tuning panel: ?gui (or #gui) loads lil-gui; press g to hide/show

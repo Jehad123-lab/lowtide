@@ -12,29 +12,55 @@
    This file is our own implementation of that idea.
 
    WHAT RUNS EVERY FRAME (4 passes)
-     1. PAINT  — ping-pong RGBA16F target at 1/paintDiv of the canvas (default 1/4).
+     1. PAINT  — ping-pong target at 1/paintDiv of the canvas (default 1/4, Lusion's ">> 2").
+                 Half-float (RGBA16F) by default; an 8-bit (RGBA8) mode exists like Lusion's (Quality → 8-bit).
                  A soft capsule brush (2D segment distance field) from the previous pointer position to the
-                 current one writes:   .xy = velocity (paint px / frame, signed -> needs half-float)
-                                       .z  = "slow" weight (the body of the stroke, fades over ~2-3 s)
-                                       .w  = "fast" weight (a short-lived highlight right behind the cursor)
-                 Every texel then advects itself along a BLURRED low-res copy of the velocity (step 2 of the
-                 previous frame) — that is what makes strokes spread, float and get wavy edges — decays per
-                 channel (dissV / dissW1 / dissW2) and gets a little curl-noise wobble.
-     2. BLUR   — copy the paint into a 1/lowDiv grid (default 1/8) and run a separable 9-tap Gaussian
-                 blurPasses times. Step 1 reads this next frame.
+                 current one writes:   .xy = velocity (signed, clamped to ±0.5 — the same range Lusion gets from
+                                             an 8-bit channel biased around 0.5)
+                                       .z  = weight 1, the long soft tail (half-life ≈ 0.23 s)
+                                       .w  = weight 2, the short crisp head (half-life ≈ 0.05 s)
+                 Every texel then advects itself along a BLURRED low-res copy of the velocity (pass 2 of the
+                 previous frame) — pushStrength texels upstream — which is what makes strokes spread, float and
+                 widen, decays per channel (dissV / dissW1 / dissW2, with a minimum step floorW) and gets a
+                 curl-noise wobble that is scaled by how much paint is there. When the page scrolls, every lookup
+                 is shifted by the scroll so the trail stays stuck to the page.
+     2. BLUR   — copy the paint into a 1/lowDiv grid (default 1/8, Lusion's ">> 3") and blur it with a separable
+                 17-tap Gaussian of radius blurRadius low texels (default 8, one H+V pass, Lusion's "blur(8, 1)").
+                 Pass 1 reads this next frame.
      3. SCENE  — full-res RGBA8 target: the page colour (alpha 0) + DOM-synced GL quads (alpha 1):
                  images ([data-gl-image]) and headlines ([data-gl-text], rasterised to a 2D canvas).
                  The DOM copies stay in the page for layout, selection and screen readers — they are just
                  made invisible (opacity 0 on the <img>, color: transparent on the text) once GL draws them.
-     4. POST   — full-screen pass to the visible canvas: refract the scene along the paint-weight gradient
-                 (thin glassy rim) + along the velocity (slow smear), 9-tap jittered directional blur along the
-                 velocity, per-channel offsets (chromatic fringe), Lusion-style sine RGB shift, a pale body
-                 tint + highlight, and thin holographic contour bands only at the stroke's edges.
+     4. POST   — full-screen pass to the visible canvas: drag the scene along the velocity (× the average of
+                 the two weights), 9 jittered taps of directional blur along it, and a 3-phase sine "oil" fringe
+                 that only shows in the fading wake. Optional extras that are OFF in the Lusion preset: glassy
+                 rim refraction along the weight gradient, per-channel chromatic split, a pale body tint +
+                 highlight, and thin holographic contour bands at the stroke's edges ("Lusion + glass" preset).
+
+   NUMBERS (v4, Oct 2026)
+     The Lusion preset (= DEFAULTS) uses the values measured in the "Lusion.co Decoded" client-side handbook by
+     shifatmasud (chapter "Special: Cursor fluid trail (ScreenPaint)" + chapter 5). Only the numbers and the
+     described behaviour were used; every line of code here is our own.
+       brush        max radius = max(40, viewportWidth / 20) CSS px (72 px at 1440 wide), mapped from the pointer's
+                    travel per frame 0 → 100 px; a still pointer paints nothing. Soft cone edge.
+       brush vel.   leaky integrator: v = v × 0.8 + step × dt × 0.8 (momentum after you stop).
+       fades/frame  velocity 0.975 (half-life ≈ 0.45 s at 60 fps), weight 1 0.95 (≈ 0.23 s), weight 2 0.8
+                    (≈ 0.05 s), with a 0.004 minimum step so tails reach exactly zero.
+       field        paint 1/4, blurred copy 1/8, blur(8, 1), push 25 texels, noise on: scale 0.02, strength 3.
+       post         9 taps, one step = velocity × amount 3 / 4 × multiplier 5 = 3.75 paint texels ≈ 15 CSS px,
+                    i.e. the taps span 0..8 steps (we express that as distort 60 + blur 60 CSS px); RGB shift 0.5,
+                    fringe 12.5 (= shade 1.25 × colour multiplier 10), visible only where weight < 0.4.
+       scroll       scroll delta × offset ratio is added to the brush (×3 for the radius test), so scrolling with
+                    a still mouse paints a streak, and the advection lookup is shifted by the scroll.
+       phone        paints only while a finger is down and moving (Lusion's mobile rule).
+     What is ours, not theirs: half-float targets by default, every fade frame-rate corrected with pow(x, dt*60)
+     (Lusion's are per frame, so a 120 Hz screen fades twice as fast there), sub-frame pointer samples, a true
+     curl noise (rotated gradient) instead of a plain gradient offset, and the optional glass extras.
 
    API
-     const fluid = createFluid(canvas, options)   // returns null when WebGL2 / half-float targets are missing
+     const fluid = createFluid(canvas, options)   // returns null when WebGL2 is missing
        fluid.enabled            set true when the page is ready (images fade/zoom in only after that)
-       fluid.pointer(x, y)      feed pointer positions in CSS px (call as often as you get them)
+       fluid.pointer(x, y, isTouch)  feed pointer positions in CSS px (call as often as you get them)
        fluid.pointerLeave()     end the current stroke (pointer left / finger lifted)
        fluid.render(now)        draw one frame (when options.manual is true you drive the loop yourself)
        fluid.resize()           re-measure the canvas (also done automatically every frame)
@@ -44,45 +70,51 @@
        fluid.showText(el, on)   hand a headline to GL (on=true) or back to the DOM (on=false)
        fluid.set({...})         change any option live (used by the lil-gui panel in gui.js)
        fluid.settings()         current tunable values as a plain object (for "copy settings JSON")
-       fluid.defaults / fluid.options / fluid.halfFloat / fluid.stats() / fluid.destroy()
+       fluid.defaults           DEFAULTS + the device options the page passed in (a phone's dpr / paint grid),
+                                so "reset" and presets in the panel keep the device-appropriate quality
+       fluid.options / fluid.halfFloat / fluid.stats() / fluid.destroy()
 
    THREE PITFALLS WE HIT TUNING v3 (AND WHERE THE FIX LIVES)
      1. Additive curl noise accumulates. Adding noise to the stored velocity every frame makes it grow without
         limit, and the whole screen starts swimming. Fix: the noise only perturbs WHERE the paint shader samples
-        the previous frame (see "push += curl(...)" in PAINT), weighted by the stroke's own weight. The shape
-        drifts but the velocity never grows. The brush also SETS the velocity under the capsule (mix) instead of
-        adding to it.
+        the previous frame (see "off += curl(...)" in PAINT), weighted by the stroke's own weight. The shape
+        drifts but the velocity never grows. (v4: the brush now ADDS velocity like Lusion, but the stored value
+        is clamped to ±0.5, so holding the mouse in one spot still cannot run away.)
      2. Hitch frames become giant velocities. After a long frame or a tab switch, the pointer "jumps" hundreds of
-        px in one step, and that reads as a huge flick. Fix: stepPaint() caps each segment's pointer delta at 44 CSS px
-        before it becomes velocity, and the frame loop clamps dt to 1..50 ms.
-     3. Frame-rate-dependent decay. Multiplying by 0.985 per frame fades twice as fast at 120 Hz as at 60 Hz.
-        Fix: the dissipations are tuned at 60 fps and applied as pow(x, dt*60) in paintPass() (floorW is scaled
-        by the same factor). Extra sub-frame segments painted in the same frame get dt = 0, so they add brush
-        strokes without adding decay, advection or noise.
+        px in one step, and that reads as a huge flick. Fix: stepPaint() skips any single segment longer than
+        600 CSS px (a teleport, not a flick), the velocity is clamped in the shader, and the frame loop clamps dt
+        to 1..50 ms.
+     3. Frame-rate-dependent decay. Multiplying by 0.975 per frame fades twice as fast at 120 Hz as at 60 Hz.
+        Fix: the dissipations are tuned at 60 fps and applied as pow(x, dt*60) in paintPass() (floorW, the push
+        and the noise offset are scaled by the same factor). Extra sub-frame segments painted in the same frame
+        get dt = 0, so they add brush strokes without adding decay, advection or noise.
 
    INPUT (main.js feeds this)
      Mouse/pen: every getCoalescedEvents() sample goes to fluid.pointer(), and up to segmentsPerFrame capsules
      are painted per frame, so a fast flick is a curve, not a straight chord. Touch: touchstart ends the old
-     stroke and starts a new one, touchmove carries velocity, and touchend / touchcancel end the stroke.
+     stroke and starts a new one, touchmove carries velocity, and touchend / touchcancel end the stroke — no
+     finger, no paint. Scroll: the fluid reads window.scrollY itself each frame (see stepPaint).
 
    KNOBS — see DEFAULTS below, every one is commented. The ones you will touch most:
-     brushMin / brushRadius (stroke size), pushStrength (spread), dissV / dissW1 (how long it lingers),
-     distort / refract / blur (how strongly the page bends), chroma / rgbShift / rim (colour fringes).
+     brushRadius / brushVw (stroke size), pushStrength (spread), dissV / dissW1 / dissW2 (how long it lingers),
+     distort / blur (how far the page is dragged), rgbShift / fringe (oil colours), scrollPaint (scroll streaks).
    ===================================================================================================== */
 // canvas: the <canvas> to draw into (main.js uses a fixed, full-viewport, pointer-events:none canvas behind the page).
-// opts:   any subset of DEFAULTS below, plus  manual (true = no internal rAF; call render(now) yourself),
+// opts:   any subset of DEFAULTS below (a phone passes a lower dpr / coarser paintDiv here — those become its
+//         defaults too), plus  manual (true = no internal rAF; call render(now) yourself),
 //         hold (freeze the paint, for frame captures) and fixedDt (force a constant timestep).
 export function createFluid(canvas, opts = {}) {
   // alpha:false -> the canvas is opaque (the post pass writes the full page colour itself);
   // no AA / depth / stencil: everything here is full-screen triangles and 2D quads.
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false });
   if (!gl) return null;
-  // Rendering INTO half-float textures needs one of these extensions. The paint buffer stores signed velocity,
-  // which an 8-bit target cannot hold (Lusion packs it into 8 bits; half-float is simpler and more precise).
+  // Rendering INTO half-float textures needs one of these extensions. Half-float lets the paint buffer store
+  // signed velocity directly. Lusion uses plain 8-bit targets with the velocity biased around 0.5; we keep that as
+  // a fallback (and as a toggle in the panel): with no half-float support the fluid runs in 8-bit instead of
+  // giving up.
   const extHalf = gl.getExtension('EXT_color_buffer_half_float');
   const extFloat = gl.getExtension('EXT_color_buffer_float');
   const halfOK = !!(extHalf || extFloat);
-  if (!halfOK) return null;                      // caller falls back to the static page (signed velocity needs a half-float target)
   // Lets float textures be sampled with LINEAR filtering where the driver needs it (half-float is filterable in WebGL2).
   gl.getExtension('OES_texture_float_linear');
 
@@ -91,46 +123,66 @@ export function createFluid(canvas, opts = {}) {
   const DEFAULTS = {
     // Canvas resolution multiplier. Capped at 1.5: the post pass is per-pixel, 2x/3x screens would cost 2-4x for little gain.
     dpr: Math.min(window.devicePixelRatio || 1, 1.5),
-    // paintDiv: paint grid = canvas / 4 (Edan's 1/4 grid).  lowDiv: blurred grid = canvas / 8.
-    // blurPasses: how many H+V Gaussian passes the low grid gets (more = softer, wider spread).
-    paintDiv: 4, lowDiv: 8, blurPasses: 3,
-    // brush (Lusion: capsule prev→current, radius from pointer speed, nothing painted when still)
-    brushMin: 14, brushRadius: 64,          // css px radius at zero / full speed
-    speedFull: 40,                          // css px per frame that counts as "full speed"
-    brushVel: 0.6,                          // pointer delta → stored velocity (× this)
-    brushSoft: 0.45,                        // 0 = hard capsule edge, 1 = fully soft
-    segmentsPerFrame: 4,                    // sub-frame pointer samples painted as separate capsules
+    // paintDiv: paint grid = canvas / 4 (Lusion ">> 2", Edan's 1/4 grid).  lowDiv: blurred grid = canvas / 8 (">> 3").
+    paintDiv: 4, lowDiv: 8,
+    // float8: false = half-float paint targets (signed velocity, smooth fades); true = 8-bit like Lusion (velocity
+    // stored biased around 0.5, fades step in 1/255 increments — that is why floorW exists). Forced true when the
+    // GPU cannot render to half-float.
+    float8: !halfOK,
+    // brush — a capsule from the previous pointer position to the current one.
+    //   max radius = max(brushRadius, viewportWidth / brushVw) CSS px. Lusion: max(40, width / 20) -> 72 px at 1440 wide,
+    //   40 px on a phone. brushVw: 0 switches the viewport rule off (then brushRadius is the max radius).
+    brushRadius: 40, brushVw: 20,
+    brushMin: 0,                            // css px radius at the slightest movement (Lusion maps travel 0 -> radius 0)
+    speedFull: 100,                         // css px of pointer travel per 60 fps frame that gives the max radius (Lusion: 100)
+    brushVel: 0.8,                          // brush velocity gain: each frame v += step(paint px) × dt × brushVel  (Lusion 0.8)
+    brushAccel: 0.8,                        // brush velocity momentum: v × brushAccel per 60 fps frame (Lusion 0.8, ~5× one step at steady speed)
+    brushSoft: 1.0,                         // 0 = hard capsule edge, 1 = fully soft cone (Lusion: smoothstep from 0 to radius)
+    segmentsPerFrame: 4,                    // sub-frame pointer samples painted as separate capsules (ours, not Lusion's)
+    // scroll paint: the scroll delta × scrollPaint is added to the brush (×3 for the radius test, ×1 for the velocity),
+    // so scrolling with a still mouse paints a streak. 0 = off. Lusion's offset ratio is 1 by default and sections
+    // scale it between 0 and 1. The paint itself always follows the page while it scrolls.
+    scrollPaint: 1.0,
     // field
-    pushStrength: 1.1,                      // self-advection along the blurred low-res field (× velocity)
+    pushStrength: 25,                       // self-advection: texels upstream along the blurred field per unit of velocity (Lusion 25)
+    blurRadius: 8, blurPasses: 1,           // the 1/8 copy's Gaussian: radius in low texels, H+V passes (Lusion "blur(8, 1)")
     // Per-frame multipliers at 60 fps (made frame-rate independent with pow(x, dt*60) in paintPass):
-    // dissV  - velocity      (0.985 -> velocity halves in ~0.8 s)
-    // dissW1 - slow weight   (0.99  -> the visible stroke lingers ~2-3 s)
-    // dissW2 - fast weight   (0.8   -> highlight gone in a few frames)
-    dissV: 0.985, dissW1: 0.99, dissW2: 0.8,
-    // Subtracted from the slow weight every frame so tails reach exactly 0 instead of fading forever.
-    floorW: 0.0012,
-    // Curl-noise wobble of the advection lookup (strength, spatial frequency). Makes edges organic, not blobby.
-    noise: 0.25, noiseScale: 3.0,
-    // distortion (post)
-    distort: 10,                            // css px of UV offset per unit velocity (Lusion: amount 20 × 1.25)
+    // dissV  - velocity      (0.975 -> half-life ≈ 0.45 s)
+    // dissW1 - weight 1, the long soft tail   (0.95 -> ≈ 0.23 s)
+    // dissW2 - weight 2, the crisp head       (0.8  -> ≈ 0.05 s)
+    dissV: 0.975, dissW1: 0.95, dissW2: 0.8,
+    // Minimum amount a weight drops per frame, so tails reach exactly 0 instead of fading forever (Lusion 0.004 ≈ 1/255).
+    floorW: 0.004,
+    // Curl-noise wobble of the advection lookup: offset in texels = curl × (weight1 + weight2) × noise.
+    // noiseScale = noise frequency per paint texel. Lusion (gradient noise): strength 3, scale 0.02.
+    noise: 3, noiseScale: 0.02,
+    // distortion (post). Velocity here is "normalised": stored velocity × 2 × average weight, so -1..1.
+    distort: 60,                            // css px the page is dragged along the velocity at |v| = 1 (Lusion: 4 of its 15 px steps)
     domDistort: 1.0,                        // multiplier of the offset on content (text/images) vs the page
-    refract: 24,                            // px displacement per unit weight-gradient (glassy rim)
-    blur: 2.5,                              // 9-tap directional blur: ± velocity × this, css px
-    jitter: 0.8,                            // blue-noise-ish jitter of the taps (0..1)
-    chroma: 0.3,                            // per-channel offset of the displacement
-    rgbShift: 0.35,                         // Lusion's sine RGB shift from velocity
-    // look
+    blur: 60,                               // 9-tap directional blur: ± css px around the dragged point (taps span 0..2×distort)
+    jitter: 1.0,                            // per-pixel random shift of the taps, in tap steps (Lusion: blue noise, 1 step)
+    rgbShift: 0.5,                          // phase spread of the 3-channel sine fringe (Lusion 0.5)
+    fringe: 12.5,                           // strength of that fringe (Lusion: shade 1.25 × colour multiplier 10)
+    refract: 0,                             // glass extra: px displacement per unit weight-gradient (rim). 0 in the Lusion preset
+    chroma: 0,                              // glass extra: per-channel offset of the displacement. 0 in the Lusion preset
+    // look (glass extras, all 0 in the Lusion preset — see the "Lusion + glass" preset in gui.js)
     // rim: strength of the holographic contour bands at stroke edges.  bands: how many bands per unit of weight.
-    rim: 0.10, bands: 18.0,
+    rim: 0, bands: 18.0,
     // Pale blue-white multiply over the stroke body (on the page only, not on images/text).
-    bodyTint: [0.94, 0.955, 0.995], bodyStrength: 1.0,
-    // Additive white from the fast weight, i.e. a soft sheen right behind the cursor.
-    highlight: 0.06,
+    bodyTint: [0.94, 0.955, 0.995], bodyStrength: 0,
+    // Additive white from weight 2, i.e. a soft sheen right behind the cursor.
+    highlight: 0,
     // Page colour drawn into the scene (should match --page in style.css).
     paper: [1, 1, 1],
   };
   // o = the live option object; fluid.set() mutates it, every pass reads it each frame.
   const o = Object.assign({}, DEFAULTS, opts);
+  if (!halfOK) o.float8 = true;
+  // BASE = what "reset" and presets go back to: DEFAULTS + whatever DEFAULTS keys the page passed in. A phone passes
+  // { dpr: 1.25, paintDiv: 3 }, so resetting from the panel keeps the phone's 1/3 grid instead of the desktop's 1/4.
+  const BASE = Object.assign({}, DEFAULTS);
+  for (const key in opts) if (key in DEFAULTS) BASE[key] = opts[key];
+  if (!halfOK) BASE.float8 = true;
 
   // ---------- shaders ----------
   // ---------- GLSL ----------
@@ -156,46 +208,61 @@ export function createFluid(canvas, opts = {}) {
   // PASS 1 — PAINT. Uniforms:
   //   uPrev      last frame's paint (read side of the ping-pong)      uLow   blurred low-res paint (pass 2)
   //   texel      1 / paint size (uv per paint pixel)                  size   paint size in px
-  //   from, to   capsule ends in paint px (y up). -99 = "no stroke this frame"
-  //   brushVel   velocity the brush writes (paint px / frame)         radius capsule radius in paint px
-  //   strength   0..1 brush opacity (scaled by pointer speed)         soft   edge softness (0 hard .. 1 soft)
-  //   pushStrength  self-advection amount     dissV/dissW1/dissW2  per-channel decay (already pow'd by dt)
-  //   floor1     weight floor subtracted per frame                    noise, noiseScale, time  curl wobble
+  //   from, to   capsule ends in paint px (y up)                      rFrom, rTo  radius at each end (paint px)
+  //   brushVel   velocity the brush adds under the capsule            strength    0..1 brush opacity (0 = no brush)
+  //   soft       edge softness (0 hard .. 1 soft cone)                scrollUv    this frame's scroll, in uv (y up)
+  //   pushStrength  texels of self-advection (already × dt*60)        dissV/dissW1/dissW2  decay (already pow'd by dt)
+  //   floorW     minimum weight drop this frame                       noise, noiseScale, time  curl wobble
+  //   bias       0 for half-float targets, 0.5 for 8-bit (velocity is stored as v + 0.5 there)
   const PAINT = F(`
-    // Self-advection: move the lookup BACKWARDS along the blurred velocity (semi-Lagrangian), so the
-    // paint flows in the direction it is moving. Using the blurred copy instead of the sharp one is the
-    // trick from Edan's comment: it spreads the stroke and keeps it from tearing.
-    vec4 low = texture(uLow, vUv);
-    vec2 push = low.xy * pushStrength * texel;           // advect along the blurred field
-    push += curl(vUv * noiseScale + time * 0.05) * noise * texel * low.z;   // curl-noise wobble of the sampling position (shape drifts, velocity does not grow)
-    vec4 p = texture(uPrev, vUv - push);
+    // Self-advection: move the lookup BACKWARDS (upstream) along the blurred velocity (semi-Lagrangian), so the
+    // paint flows in the direction it is moving. Using the blurred 1/8 copy instead of the sharp one is the
+    // trick from Edan's comment: it spreads the stroke into a widening wake and keeps it from tearing.
+    // scrollUv shifts every lookup by this frame's scroll, so the paint stays glued to the page.
+    vec2 uv0 = vUv - scrollUv;
+    vec4 low = texture(uLow, uv0);
+    vec2 lowVel = low.xy - bias;                          // signed velocity of the blurred field
+    float lowAmt = low.z + low.w;                         // how much paint is around (0..2)
+    vec2 off = -lowVel * pushStrength;                    // in paint texels, upstream
+    // Curl-noise wobble of the sampling position (the shape drifts and curls, the velocity never grows).
+    // The noise domain is pushed around by the local velocity, so the swirls follow the stroke.
+    vec2 q = vUv * size * noiseScale + lowVel * 6.0 + vec2(time * 0.02, 0.0);
+    off += curl(q) * lowAmt * noise;
+    vec4 p = texture(uPrev, uv0 + off * texel);
+    vec2 v = p.xy - bias;
     // Capsule brush = distance from this pixel to the segment from -> to:
     //   h = projection of the pixel onto the segment, clamped to 0..1;  d = distance to the closest point.
-    // Inside radius -> 1, outside -> 0, with a smoothstep edge whose width is set by soft.
+    // The radius is interpolated along the segment (last frame's radius -> this frame's), so a stroke that
+    // speeds up or slows down tapers smoothly instead of stepping.
     vec2 px = vUv * size;                                 // paint-pixel coords
     vec2 pa = px - from, ba = to - from;
     float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0., 1.);
     float d = length(pa - ba * h);
-    float m = 1.0 - smoothstep(radius * (1.0 - soft), radius, d);  // capsule, edge softness
+    float r = mix(rFrom, rTo, h);
+    float m = r > 0.001 ? 1.0 - smoothstep(r * (1.0 - soft) - 0.01, r, d) : 0.0;
     m *= strength;
-    // Velocity: decay, then blend toward the brush velocity under the capsule (mix, not add, so holding
-    // the mouse in one spot never accumulates a runaway value).
-    // Weights: decay minus a small floor, then max() with the brush mask so the stroke is fully on where
-    // the brush just passed. w2 decays much faster (and with a 3x floor) -> the short highlight.
-    vec2 v = p.xy * dissV;
-    v = mix(v, brushVel, m);                              // the brush SETS the velocity under the capsule (no runaway accumulation)
-    float w1 = max(p.z * dissW1 - floor1, 0.0); w1 = max(w1, m);
-    float w2 = max(p.w * dissW2 - floor1 * 3.0, 0.0);  w2 = max(w2, m);
-    o = vec4(v, w1, w2);`,
-    `uniform sampler2D uPrev, uLow; uniform vec2 texel, size, from, to, brushVel; uniform float radius, strength, soft, pushStrength, dissV, dissW1, dissW2, floor1, noise, noiseScale, time; ${NOISE}`);
+    // Velocity: decay, then ADD the brush velocity under the capsule and clamp to ±0.5 (the range an 8-bit channel
+    // biased at 0.5 can hold — the same range Lusion works in). Under a moving brush it saturates within a few
+    // frames, so the wake carries the stroke's direction at near-full strength and the weights do the fading.
+    v = clamp(v * dissV + brushVel * m, vec2(-0.5), vec2(0.5));
+    // Weights: drop by the larger of "x (1 - diss)" and floorW (so they reach exactly 0), then add the brush.
+    float w1 = max(p.z - max(p.z * (1.0 - dissW1), floorW), 0.0);
+    float w2 = max(p.w - max(p.w * (1.0 - dissW2), floorW), 0.0);
+    w1 = min(w1 + m, 1.0); w2 = min(w2 + m, 1.0);
+    o = vec4(v + bias, w1, w2);`,
+    `uniform sampler2D uPrev, uLow; uniform vec2 texel, size, from, to, brushVel, scrollUv; uniform float rFrom, rTo, strength, soft, pushStrength, dissV, dissW1, dissW2, floorW, noise, noiseScale, time, bias; ${NOISE}`);
   // COPY: plain texture copy (paint -> low-res grid; bilinear filtering does the downsample).
   const COPY = F(`o = texture(uT, vUv);`, `uniform sampler2D uT;`);
-  // PASS 2 — BLUR: separable 9-tap Gaussian done with 5 bilinear fetches (the classic linear-sampling offsets
-  // 1.3846 / 3.2308 and weights .2270 / .3162 / .0703). dir = (1,0) horizontal or (0,1) vertical.
-  const BLUR = F(`vec4 s = texture(uT, vUv) * 0.2270270270;
-    s += (texture(uT, vUv + dir*texel*1.3846153846) + texture(uT, vUv - dir*texel*1.3846153846)) * 0.3162162162;
-    s += (texture(uT, vUv + dir*texel*3.2307692308) + texture(uT, vUv - dir*texel*3.2307692308)) * 0.0702702703;
-    o = s;`, `uniform sampler2D uT; uniform vec2 texel, dir;`);
+  // PASS 2 — BLUR: separable Gaussian, 17 taps spread evenly over ±radius low texels (sigma = radius × 0.4).
+  // dir = (1,0) horizontal or (0,1) vertical. Bilinear filtering fills in between taps when radius > 8.
+  // In 8-bit mode the velocity is biased, but a blur is a weighted average, so the bias survives untouched.
+  const BLUR = F(`vec4 s = vec4(0.0); float ws = 0.0;
+    for (int i = -8; i <= 8; i++) {
+      float t = float(i) / 8.0;                          // -1..1 across the kernel
+      float wt = exp(-t * t * 3.125);                   // Gaussian with sigma 0.4 of the radius
+      s += texture(uT, vUv + dir * texel * radius * t) * wt; ws += wt;
+    }
+    o = s / ws;`, `uniform sampler2D uT; uniform vec2 texel, dir; uniform float radius;`);
 
   // 3. scene quads (images + text) — plain draw, rounded corners, reveal mask
   // PASS 3 — SCENE quads. QV places a unit quad on screen: rect = (x, y, w, h) in clip space, computed in JS
@@ -226,19 +293,24 @@ export function createFluid(canvas, opts = {}) {
     o = vec4(c.rgb, c.a * edge * corner * alpha);
   }`;
 
-  // 4. post: refraction + directional blur + chromatic fringe + holographic rim
+  // 4. post: velocity drag + directional blur + sine fringe (+ optional glass extras)
   // PASS 4 — POST. Uniforms:
   //   uPaint    paint buffer (velocity xy, weights zw)      uScene  the scene from pass 3
   //   ptexel    1 / paint size                              stexel  uv per CSS px of the canvas
-  //   distort   uv offset per unit velocity (smear)         domDistort  extra factor on images/text
-  //   refract   uv offset per unit weight gradient (rim)    blur    length of the directional blur
-  //   jitter    random offset of the 9 taps (hides banding) chroma  per-channel displacement split
-  //   rgbShift  sine RGB tint from speed                    rim, bands  holographic contour lines
-  //   bodyTint, bodyStrength, highlight  the pale glass body + sheen      time  animates the jitter
+  //   distort   css px of drag at |velocity| = 1            domDistort  extra factor on images/text
+  //   blur      ± css px of directional blur around it      jitter  random shift of the 9 taps, in tap steps
+  //   rgbShift  phase spread of the sine fringe             fringe  its strength
+  //   refract   uv offset per unit weight gradient (rim)    chroma  per-channel displacement split
+  //   rim, bands  holographic contour lines                 bodyTint, bodyStrength, highlight  glassy body + sheen
+  //   bias      0 (half-float) or 0.5 (8-bit)               time    animates the jitter
   const POST = F(`
     vec4 pt = texture(uPaint, vUv);
-    vec2 vel = pt.xy; float w = pt.z, w2 = pt.w;
-    // Central differences of the slow weight -> its gradient g. It is large only at the stroke's edge, which is where a lens of liquid would refract most.
+    vec2 vel = pt.xy - bias; float w = pt.z, w2 = pt.w;
+    // Normalised velocity: stored velocity (±0.5) × 2 × the average of both weights -> -1..1. The fresh head
+    // (weight 2) makes the leading stroke bend hardest; once it is gone the soft tail keeps a gentler drag.
+    float wAvg = 0.5 * (w + w2);
+    vec2 nv = vel * 2.0 * wAvg;
+    // Central differences of weight 1 -> its gradient g. Large only at the stroke's edge (used by the glass extras).
     float wl = texture(uPaint, vUv - vec2(ptexel.x, 0.)).z, wr = texture(uPaint, vUv + vec2(ptexel.x, 0.)).z;
     float wb = texture(uPaint, vUv - vec2(0., ptexel.y)).z, wt = texture(uPaint, vUv + vec2(0., ptexel.y)).z;
     vec2 g = vec2(wr - wl, wt - wb);                       // gradient of the stroke weight (the rim)
@@ -246,38 +318,42 @@ export function createFluid(canvas, opts = {}) {
     // Scene alpha says what is under the pixel: 0 = bare page, 1 = image/text quad. Lets text and images distort by a different amount (domDistort).
     float content0 = texture(uScene, vUv).a;               // what is under this pixel: 0 page, 1 image/text
     float dm = mix(1.0, domDistort, content0);
-    vec2 flowUv = vel * distort * dm * stexel;             // Lusion's offset: velocity × amount (× weight is already in vel's decay)
-    vec2 rimUv = g * refract * stexel;                     // glassy rim: offset along the weight gradient
+    // Read the scene UPSTREAM of the motion (minus sign), so what is under the stroke is dragged along with the cursor.
+    vec2 flowUv = -nv * distort * dm * stexel;
+    vec2 rimUv = g * refract * stexel;                     // glass extra: offset along the weight gradient
     vec2 disp = flowUv + rimUv;
-    // 9-tap directional blur along the velocity (Lusion's ScreenPaintDistortion idea). Each tap reads
-    // R slightly ahead and B slightly behind the displacement -> thin oily chromatic fringes.
-    // j is per-pixel hash noise that shifts all taps a little, trading banding for fine grain.
-    vec2 bdir = vel * blur * stexel;                       // directional blur vector
+    // 9 taps of directional blur along the velocity, centred on the dragged point: with blur == distort the taps run
+    // from this pixel to 2 × distort upstream — Lusion's "9 steps from here along the velocity" layout.
+    // j is per-pixel hash noise that shifts all taps (up to jitter steps), trading banding for fine grain.
+    vec2 bdir = -nv * blur * stexel;                       // directional blur vector
     float j = (fract(sin(dot(gl_FragCoord.xy + fract(time) * 61.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * jitter;
     vec3 col = vec3(0.); float content = 0.0;
     vec2 base = vUv + disp;
     for (int i = 0; i < 9; i++) {
       float t = (float(i) - 4.0 + j) / 4.0;               // -1..1 across the blur
       vec2 uv = base + bdir * t;
+      // chroma > 0: R reads slightly ahead and B slightly behind the displacement -> thin chromatic fringes.
       col.r += texture(uScene, uv + disp * chroma).r;
       vec4 c = texture(uScene, uv); col.g += c.g; content += c.a;
       col.b += texture(uScene, uv - disp * chroma).b;
     }
     col /= 9.0; content /= 9.0;
     float page = 1.0 - content * 0.75;                     // the glassy tint lives on the page; images/text mostly just refract
-    // Lusion's velocity-driven sine RGB shift (a tint that rides the smear), kept gentle
-    float sv = length(vel);
-    col += sin(sv * 1.4 + vec3(0.0, 2.0, 4.0)) * rgbShift * 0.08 * clamp(sv, 0., 1.) * w;
-    // pale glassy body + fast highlight
-    // Pale glassy body (multiply) + highlight (add), both mostly on the page so photos are not washed out.
+    // Oil fringe: three sine waves of the velocity, phase-shifted per channel by rgbShift, scaled by speed.
+    // wake = 1 - smoothstep(-0.9, 0.4, wAvg): strongest where the weight is low, gone above 0.4 — so the colour
+    // only shows in the fading wake, never on the fresh stroke.
+    float wake = 1.0 - smoothstep(-0.9, 0.4, wAvg);
+    col += sin(vec3((nv.x + nv.y) * 40.0) + vec3(0.0, 2.0, 4.0) * rgbShift) * wake * max(abs(nv.x), abs(nv.y)) * fringe;
+    // Glass extras (0 in the Lusion preset): pale body (multiply) + highlight (add), both mostly on the page.
     col = mix(col, col * bodyTint, clamp(w * bodyStrength, 0., 1.) * page);
     col += w2 * highlight * page;
     // holographic bands: contour lines of the weight field, only where the field changes (edges)
+    float sv = length(nv) * 2.4;
     float edge = smoothstep(0.0, 0.08, gl2);
-    vec3 holo = (sin(w * bands + sv * 0.6 + vec3(0.0, 2.1, 4.2)) * 0.5 + 0.5) * vec3(1.0, 1.0, 0.55);
+    vec3 holo = (sin(w * bands + sv + vec3(0.0, 2.1, 4.2)) * 0.5 + 0.5) * vec3(1.0, 1.0, 0.55);
     col -= holo * rim * edge * page;                       // on a light page: thin pastel lines (pink / cyan); on a dark one: faint glow
     o = vec4(col, 1.);`,
-    `uniform sampler2D uPaint, uScene; uniform vec2 ptexel, stexel; uniform float distort, domDistort, refract, blur, jitter, chroma, rgbShift, rim, bands, bodyStrength, highlight, time; uniform vec3 bodyTint;`);
+    `uniform sampler2D uPaint, uScene; uniform vec2 ptexel, stexel; uniform float distort, domDistort, refract, blur, jitter, chroma, rgbShift, fringe, rim, bands, bodyStrength, highlight, time, bias; uniform vec3 bodyTint;`);
 
   // ---------- GL plumbing ----------
   // compile/program: build a program and collect every active uniform location into p.u[name],
@@ -319,15 +395,24 @@ export function createFluid(canvas, opts = {}) {
   function pingpong(w, h, internal, format, type, filter) { let r = fbo(w, h, internal, format, type, filter), wr = fbo(w, h, internal, format, type, filter); return { get read() { return r; }, get write() { return wr; }, swap() { const x = r; r = wr; wr = x; }, w, h, texel: r.texel, ok: r.ok && wr.ok }; }
 
   // S holds the render targets: S.paint (ping-pong, 1/4 res), S.low (ping-pong, 1/8 res, blurred), S.scene (full res).
-  // They are recreated whenever the canvas size changes. textDirty = headlines need re-rasterising.
-  let S = {}, textDirty = false;
+  // They are recreated whenever the canvas size, a grid divisor or the precision changes (the old ones are freed).
+  // textDirty = headlines need re-rasterising.
+  // Paint/low targets: RGBA16F (half-float) or, with o.float8, RGBA8 like Lusion. In 8-bit the velocity is stored
+  // as v + 0.5 (BIAS), so "still" must be cleared to (0.5, 0.5, 0, 0), not to zero.
+  let S = {}, textDirty = false, BIAS = 0;
+  function freeTarget(t) { if (!t) return; for (const x of (t.read ? [t.read, t.write] : [t])) { gl.deleteTexture(x.t); gl.deleteFramebuffer(x.f); } }
   function initTargets() {
+    freeTarget(S.paint); freeTarget(S.low); freeTarget(S.scene);
     const pw = Math.max(8, Math.round(canvas.width / o.paintDiv)), ph = Math.max(8, Math.round(canvas.height / o.paintDiv));
     const lw = Math.max(4, Math.round(canvas.width / o.lowDiv)), lh = Math.max(4, Math.round(canvas.height / o.lowDiv));
-    const mk = (w, h) => pingpong(w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR);
+    const eight = !!o.float8 || !halfOK;
+    BIAS = eight ? 0.5 : 0;
+    const mk = eight ? (w, h) => pingpong(w, h, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR)
+                     : (w, h) => pingpong(w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR);
     S.paint = mk(pw, ph); S.low = mk(lw, lh);
     S.scene = fbo(canvas.width, canvas.height, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, gl.LINEAR);
     if (!(S.paint.ok && S.low.ok && S.scene.ok)) throw new Error('fbo incomplete');
+    if (eight) for (const x of [S.paint.read, S.paint.write, S.low.read, S.low.write]) { gl.bindFramebuffer(gl.FRAMEBUFFER, x.f); gl.viewport(0, 0, x.w, x.h); gl.clearColor(0.5, 0.5, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
   }
   // resize(): match the drawing buffer to the CSS size × dpr, capped at the GPU's max size (very tall viewports).
   const MAXSZ = Math.min(4096, gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 4096);
@@ -350,55 +435,90 @@ export function createFluid(canvas, opts = {}) {
   // ---------- pointer ----------
   // CSS px → paint px. Pointer samples queue up (pointermove can arrive several times per frame, getCoalescedEvents more);
   // each frame paints up to `segmentsPerFrame` capsules prev→next through the queue, so a fast flick is a curve, not a chord.
-  let queue = [], prevPt = null, speed = 0;
-  function pointer(x, y) { if (!prevPt) { prevPt = [x, y]; return; } queue.push([x, y]); if (queue.length > 24) queue.splice(0, queue.length - 24); }
-  function pointerLeave() { prevPt = null; queue.length = 0; speed = 0; }
+  // touching: the current stroke comes from a finger (scroll paint is off then — on a phone the finger IS the scroll).
+  let queue = [], prevPt = null, touching = false;
+  function pointer(x, y, isTouch = false) { touching = !!isTouch; if (!prevPt) { prevPt = [x, y]; return; } queue.push([x, y]); if (queue.length > 24) queue.splice(0, queue.length - 24); }
+  function pointerLeave() { prevPt = null; queue.length = 0; touching = false; }
+
+  // Brush state carried between frames:
+  //   bv      the brush velocity (paint px), a leaky integrator like Lusion's: bv = bv × 0.8 + step × dt × 0.8
+  //   lastR   last frame's radius (paint px) — each capsule's radius ramps from lastR to this frame's
+  //   lastScroll  window.scrollY at the previous frame (null until the first frame)
+  let bv = [0, 0], lastR = 0, lastScroll = null;
 
   // One PAINT pass. from/to are CSS px (y down); they are converted to paint px with y flipped (GL y is up).
   // k = paint px per CSS px. When dt is 0 (an extra segment in the same frame) advection, noise and decay are
-  // switched off so a fast flick painted as 4 segments does not decay 4 times.
-  function paintPass(from, to, radius, strength, bv, dt, now) {
+  // switched off so a fast flick painted as 4 segments does not decay 4 times. scrollUv (uv, y up) is applied only
+  // on the frame's first pass for the same reason.
+  function paintPass(from, to, r0, r1, strength, vel, dt, now, scrollUv) {
     const k = S.paint.w / canvas.clientWidth, H = canvas.clientHeight;
     gl.useProgram(P.paint.p);
     gl.uniform1i(P.paint.u.uPrev, S.paint.read.attach(0)); gl.uniform1i(P.paint.u.uLow, S.low.read.attach(1));
     gl.uniform2f(P.paint.u.texel, S.paint.texel[0], S.paint.texel[1]); gl.uniform2f(P.paint.u.size, S.paint.w, S.paint.h);
     gl.uniform2f(P.paint.u.from, from ? from[0] * k : -99, from ? (H - from[1]) * k : -99);
     gl.uniform2f(P.paint.u.to, to ? to[0] * k : -99, to ? (H - to[1]) * k : -99);
-    gl.uniform2f(P.paint.u.brushVel, bv[0], bv[1]);
-    gl.uniform1f(P.paint.u.radius, Math.max(radius, 0.001)); gl.uniform1f(P.paint.u.strength, strength); gl.uniform1f(P.paint.u.soft, o.brushSoft);
-    gl.uniform1f(P.paint.u.pushStrength, dt > 0 ? o.pushStrength : 0);
+    gl.uniform2f(P.paint.u.brushVel, vel[0], vel[1]);
+    gl.uniform1f(P.paint.u.rFrom, r0); gl.uniform1f(P.paint.u.rTo, r1);
+    gl.uniform1f(P.paint.u.strength, strength); gl.uniform1f(P.paint.u.soft, o.brushSoft);
+    gl.uniform2f(P.paint.u.scrollUv, 0, dt > 0 ? scrollUv : 0);
     const f = dt * 60;    // frame-rate independent decay (tuned at 60 fps); extra segment passes in the same frame carry no decay
+    // push and noise are per-frame displacements too, so they scale with f (a 120 Hz frame moves the paint half as far)
+    gl.uniform1f(P.paint.u.pushStrength, o.pushStrength * f);
     gl.uniform1f(P.paint.u.dissV, Math.pow(o.dissV, f)); gl.uniform1f(P.paint.u.dissW1, Math.pow(o.dissW1, f)); gl.uniform1f(P.paint.u.dissW2, Math.pow(o.dissW2, f));
-    gl.uniform1f(P.paint.u.floor1, o.floorW * f); gl.uniform1f(P.paint.u.noise, dt > 0 ? o.noise : 0); gl.uniform1f(P.paint.u.noiseScale, o.noiseScale); gl.uniform1f(P.paint.u.time, now * 0.001);
+    gl.uniform1f(P.paint.u.floorW, o.floorW * f); gl.uniform1f(P.paint.u.noise, o.noise * f); gl.uniform1f(P.paint.u.noiseScale, o.noiseScale); gl.uniform1f(P.paint.u.time, now * 0.001);
+    gl.uniform1f(P.paint.u.bias, BIAS);
     draw(P.paint, S.paint.write); S.paint.swap();
   }
-  // Turn this frame's queued pointer samples into capsules. Speed is smoothed (speed += (per - speed) * .35)
-  // and mapped to 0..1 against speedFull: it grows the radius (brushMin -> brushRadius) and the strength.
-  // No movement -> one pass with no brush (the field still advects and decays).
+  // Turn this frame's queued pointer samples (and this frame's scroll) into capsules.
+  //  1. travel = this frame's pointer path length in CSS px, normalised to a 60 fps frame (÷ dt*60).
+  //  2. scroll paint: the scroll delta × scrollPaint is added to the pointer's motion — ×3 for the radius test
+  //     (Lusion's "×3 viewport"), ×1 for the velocity — so a still mouse over a scrolling page paints a streak
+  //     (the capsule shrinks to a dot at the cursor, and the page-glued paint stretches it as the page moves).
+  //  3. radius = brushMin → max radius, linear in travel from 0 to speedFull px; exactly 0 when nothing moved.
+  //     max radius = max(brushRadius, viewport width / brushVw).
+  //  4. brush velocity: bv × brushAccel^f + step(paint px) × dt × brushVel, once per frame.
+  //  5. paint the segments; each adds bv / segments so 4 sub-frame capsules don't add 4× the velocity.
+  // No movement and no scroll -> one pass with no brush (the field still advects and decays).
   function stepPaint(now, dt) {
-    const k = S.paint.w / canvas.clientWidth;
+    const k = S.paint.w / canvas.clientWidth, f = dt * 60;
+    // scroll since last frame (CSS px, + = page moved up). Big jumps (anchor links) still move the paint with the page,
+    // but only ±200 px of it counts towards the brush.
+    const sy = window.scrollY || 0; const ds = lastScroll === null ? 0 : sy - lastScroll; lastScroll = sy;
+    const scrollUv = ds / Math.max(1, canvas.clientHeight);
+    const sPaint = prevPt && !touching ? Math.max(-200, Math.min(200, ds)) * o.scrollPaint : 0;
     // collapse the queue to at most segmentsPerFrame points (keep the last one exact)
     let pts = queue; queue = [];
     if (pts.length > o.segmentsPerFrame) { const step = pts.length / o.segmentsPerFrame; const q = []; for (let i = 1; i <= o.segmentsPerFrame; i++) q.push(pts[Math.min(pts.length - 1, Math.round(i * step) - 1)]); pts = q; }
-    if (!pts.length || !prevPt) { speed *= 0.8; paintPass(null, null, 0, 0, [0, 0], dt, now); return; }
-    let first = true;
-    for (const p of pts) {
-      const dx = p[0] - prevPt[0], dy = p[1] - prevPt[1], dist = Math.hypot(dx, dy);
-      const per = dist * (pts.length);                      // speed estimate: this frame's total path length
-      speed += (per - speed) * 0.35;
-      const sp = Math.min(1, speed / o.speedFull);
-      const radius = (o.brushMin + (o.brushRadius - o.brushMin) * sp) * k;
-      const strength = dist > 0.15 ? Math.min(1, 0.3 + sp * 0.9) : 0;
-      const cl = Math.min(1, 44 / Math.max(dist, 1e-3));     // a hitch (long frame, tab switch) must not become a giant velocity
-      const bv = [dx * cl * o.brushVel * k * pts.length, -dy * cl * o.brushVel * k * pts.length];   // per-frame velocity (y flipped: GL up)
-      paintPass(prevPt, p, radius, strength, bv, first ? dt : 0, now);
-      prevPt = p; first = false;
+    if (!prevPt) pts = [];
+    // a single segment longer than 600 css px in one frame is a teleport (tab switch, pointer re-entering), not a flick: skip it
+    if (pts.length && Math.hypot(pts[0][0] - prevPt[0], pts[0][1] - prevPt[1]) > 600) { prevPt = pts.shift(); }
+    let travel = 0, netX = 0, netY = 0, q = prevPt;
+    for (const p of pts) { const dx = p[0] - q[0], dy = p[1] - q[1]; if (Math.hypot(dx, dy) > 600) break; travel += Math.hypot(dx, dy); netX += dx; netY += dy; q = p; }
+    const fr = Math.max(f, 1e-3);
+    const radTravel = Math.hypot(travel, 3 * sPaint) / fr;                      // per 60 fps frame, scroll counted ×3
+    const maxR = Math.max(o.brushRadius, o.brushVw > 0 ? canvas.clientWidth / o.brushVw : 0);
+    const R = radTravel > 0.01 ? (o.brushMin + (maxR - o.brushMin) * Math.min(1, radTravel / o.speedFull)) * k : 0;
+    // leaky brush velocity (paint px, y flipped: GL up). The scroll term moves the "cursor" down the page.
+    const ka = Math.pow(o.brushAccel, f), g = dt * o.brushVel;
+    bv = [bv[0] * ka + netX * k * g, bv[1] * ka - (netY + sPaint) * k * g];
+    if (!R) { lastR = 0; paintPass(null, null, 0, 0, 0, [0, 0], dt, now, scrollUv); return; }
+    if (!pts.length) {      // still pointer, scrolling page: a dot at the cursor (the page-glued paint turns it into a streak)
+      paintPass(prevPt, prevPt, lastR || R, R, 1, bv, dt, now, scrollUv); lastR = R; return;
     }
+    const n = pts.length; let first = true, i = 0;
+    for (const p of pts) {
+      if (Math.hypot(p[0] - prevPt[0], p[1] - prevPt[1]) > 600) { prevPt = p; i++; continue; }
+      const r0 = lastR + (R - lastR) * (i / n), r1 = lastR + (R - lastR) * ((i + 1) / n);
+      paintPass(prevPt, p, r0, r1, 1, [bv[0] / n, bv[1] / n], first ? dt : 0, now, scrollUv);
+      prevPt = p; first = false; i++;
+    }
+    if (first) paintPass(null, null, 0, 0, 0, [0, 0], dt, now, scrollUv);       // every segment was a teleport: still advance the field
+    lastR = R;
   }
-  // PASS 2: paint -> low-res copy, then blurPasses × (horizontal + vertical) Gaussian on the low grid.
+  // PASS 2: paint -> low-res copy, then blurPasses × (horizontal + vertical) Gaussian of radius blurRadius on the low grid.
   function blurPass() {
     gl.useProgram(P.copy.p); gl.uniform1i(P.copy.u.uT, S.paint.read.attach(0)); draw(P.copy, S.low.write); S.low.swap();
-    gl.useProgram(P.blur.p); gl.uniform2f(P.blur.u.texel, S.low.texel[0], S.low.texel[1]);
+    gl.useProgram(P.blur.p); gl.uniform2f(P.blur.u.texel, S.low.texel[0], S.low.texel[1]); gl.uniform1f(P.blur.u.radius, o.blurRadius);
     for (let i = 0; i < o.blurPasses; i++) {
       gl.uniform1i(P.blur.u.uT, S.low.read.attach(0)); gl.uniform2f(P.blur.u.dir, 1, 0); draw(P.blur, S.low.write); S.low.swap();
       gl.uniform1i(P.blur.u.uT, S.low.read.attach(0)); gl.uniform2f(P.blur.u.dir, 0, 1); draw(P.blur, S.low.write); S.low.swap();
@@ -522,18 +642,18 @@ export function createFluid(canvas, opts = {}) {
     gl.bindVertexArray(vao); gl.disable(gl.BLEND);
   }
 
-  // PASS 4 — POST to the screen. distort and blur are given in CSS px per unit velocity; k converts the paint-px
-  // velocity into CSS px so the look does not change with paintDiv. stexel converts CSS px to uv.
+  // PASS 4 — POST to the screen. distort and blur are CSS px at |normalised velocity| = 1, independent of paintDiv
+  // and dpr; stexel converts CSS px to uv.
   function post(now) {
     gl.useProgram(P.post.p);
     gl.uniform1i(P.post.u.uPaint, S.paint.read.attach(0)); gl.uniform1i(P.post.u.uScene, S.scene.attach(1));
     gl.uniform2f(P.post.u.ptexel, S.paint.texel[0], S.paint.texel[1]);
     const d = canvas.width / canvas.clientWidth;          // px (css) → uv
     gl.uniform2f(P.post.u.stexel, d / canvas.width, d / canvas.height);
-    const k = canvas.clientWidth / S.paint.w;              // velocity is in paint px/frame → css px
-    gl.uniform1f(P.post.u.distort, o.distort * k / 4); gl.uniform1f(P.post.u.domDistort, o.domDistort);
-    gl.uniform1f(P.post.u.refract, o.refract); gl.uniform1f(P.post.u.blur, o.blur * k / 4); gl.uniform1f(P.post.u.jitter, o.jitter);
-    gl.uniform1f(P.post.u.chroma, o.chroma); gl.uniform1f(P.post.u.rgbShift, o.rgbShift); gl.uniform1f(P.post.u.rim, o.rim); gl.uniform1f(P.post.u.bands, o.bands);
+    gl.uniform1f(P.post.u.distort, o.distort); gl.uniform1f(P.post.u.domDistort, o.domDistort);
+    gl.uniform1f(P.post.u.refract, o.refract); gl.uniform1f(P.post.u.blur, o.blur); gl.uniform1f(P.post.u.jitter, o.jitter);
+    gl.uniform1f(P.post.u.chroma, o.chroma); gl.uniform1f(P.post.u.rgbShift, o.rgbShift); gl.uniform1f(P.post.u.fringe, o.fringe);
+    gl.uniform1f(P.post.u.rim, o.rim); gl.uniform1f(P.post.u.bands, o.bands); gl.uniform1f(P.post.u.bias, BIAS);
     gl.uniform1f(P.post.u.bodyStrength, o.bodyStrength); gl.uniform1f(P.post.u.highlight, o.highlight); gl.uniform1f(P.post.u.time, (now * 0.001) % 100); gl.uniform3fv(P.post.u.bodyTint, o.bodyTint);
     draw(P.post, null);
   }
@@ -558,22 +678,27 @@ export function createFluid(canvas, opts = {}) {
   document.addEventListener('visibilitychange', onVis);
 
   // ---------- public API ----------
-  // set(): any option, live. Changing paintDiv / lowDiv / dpr forces the render targets to be rebuilt.
+  // set(): any option, live. Changing paintDiv / lowDiv / dpr / float8 forces the render targets to be rebuilt.
   const api = {
     enabled: false,
     pointer, pointerLeave, resize, render,
     addImage: loadImage, addText, refreshText, showText,
-    set(q) { const re = ['paintDiv', 'lowDiv', 'dpr'].some(k => k in q && q[k] !== o[k]); Object.assign(o, q); if (re) { canvas.width = 0; resize(); } },
-    get defaults() { return DEFAULTS; },
+    set(q) { const re = ['paintDiv', 'lowDiv', 'dpr', 'float8'].some(k => k in q && q[k] !== o[k]); Object.assign(o, q); if (!halfOK) o.float8 = true; if (re) { canvas.width = 0; resize(); } },
+    // defaults = DEFAULTS + the device options the page passed to createFluid (see BASE), a fresh copy each time
+    get defaults() { return Object.assign({}, BASE); },
     settings() { const out = {}; for (const k of Object.keys(DEFAULTS)) if (!['dpr', 'paper'].includes(k)) out[k] = o[k]; return out; },
     destroy() { cancelAnimationFrame(raf); document.removeEventListener('visibilitychange', onVis); gl.getExtension('WEBGL_lose_context')?.loseContext(); },
     get options() { return o; },
     get halfFloat() { return halfOK; },
-    stats() {   // debug: read the paint buffer back (max |v|, max w, coverage)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, S.paint.read.f); const w = S.paint.w, h = S.paint.h; const px = new Float32Array(w * h * 4);
-      try { gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, px); } catch (e) { return { error: e.message }; }
-      let maxV = 0, maxW = 0, cov = 0, sumW = 0; for (let i = 0; i < px.length; i += 4) { const v = Math.hypot(px[i], px[i + 1]); if (v > maxV) maxV = v; if (px[i + 2] > maxW) maxW = px[i + 2]; if (px[i + 2] > 0.05) cov++; sumW += px[i + 2]; }
-      return { w, h, maxV, maxW, coverage: cov / (w * h), meanW: sumW / (w * h), err: gl.getError() };
+    get precision() { return BIAS ? '8-bit' : 'half-float'; },
+    stats() {   // debug: read the paint buffer back (max |v|, max w, coverage). 8-bit targets read as bytes and are rescaled.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, S.paint.read.f); const w = S.paint.w, h = S.paint.h; let px;
+      try {
+        if (BIAS) { const b = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, b); px = Float32Array.from(b, (x) => x / 255); }
+        else { px = new Float32Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.FLOAT, px); }
+      } catch (e) { return { error: e.message }; }
+      let maxV = 0, maxW = 0, cov = 0, sumW = 0; for (let i = 0; i < px.length; i += 4) { const v = Math.hypot(px[i] - BIAS, px[i + 1] - BIAS); if (v > maxV) maxV = v; if (px[i + 2] > maxW) maxW = px[i + 2]; if (px[i + 2] > 0.05) cov++; sumW += px[i + 2]; }
+      return { w, h, maxV, maxW, coverage: cov / (w * h), meanW: sumW / (w * h), precision: BIAS ? '8-bit' : 'half-float', err: gl.getError() };
     },
   };
   return api;
